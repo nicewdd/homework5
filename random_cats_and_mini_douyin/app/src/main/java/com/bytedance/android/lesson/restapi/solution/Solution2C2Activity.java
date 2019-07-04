@@ -1,9 +1,13 @@
 package com.bytedance.android.lesson.restapi.solution;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
@@ -12,17 +16,30 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.Toast;
 
+import com.bumptech.glide.Glide;
+import com.bytedance.android.lesson.restapi.solution.bean.Cat;
 import com.bytedance.android.lesson.restapi.solution.bean.Feed;
+import com.bytedance.android.lesson.restapi.solution.bean.FeedResponse;
+import com.bytedance.android.lesson.restapi.solution.bean.PostVideoResponse;
+import com.bytedance.android.lesson.restapi.solution.newtork.ICatService;
+import com.bytedance.android.lesson.restapi.solution.newtork.IMiniDouyinService;
 import com.bytedance.android.lesson.restapi.solution.utils.ResourceUtils;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.RequestBody;
+import retrofit2.Response;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
+
+import static android.Manifest.permission.READ_EXTERNAL_STORAGE;
 
 public class Solution2C2Activity extends AppCompatActivity {
 
@@ -85,8 +102,8 @@ public class Solution2C2Activity extends AppCompatActivity {
                 ImageView iv = (ImageView) viewHolder.itemView;
 
                 // TODO-C2 (10) Uncomment these 2 lines, assign image url of Feed to this url variable
-//                String url = mFeeds.get(i).getImageUrl();
-//                Glide.with(iv.getContext()).load(url).into(iv);
+                String url = mFeeds.get(i).getImageUrl();
+                Glide.with(iv.getContext()).load(url).into(iv);
             }
 
             @Override public int getItemCount() {
@@ -97,12 +114,20 @@ public class Solution2C2Activity extends AppCompatActivity {
 
     public void chooseImage() {
         // TODO-C2 (4) Start Activity to select an image
-
+        Intent intent = new Intent();
+        intent.setType("image/*");
+        intent.setAction(Intent.ACTION_GET_CONTENT);
+        startActivityForResult(Intent.createChooser(intent, "Select Picture"),
+                PICK_IMAGE);
     }
 
 
     public void chooseVideo() {
         // TODO-C2 (5) Start Activity to select a video
+        Intent intent = new Intent();
+        intent.setType("video/*");
+        intent.setAction(Intent.ACTION_GET_CONTENT);
+        startActivityForResult(Intent.createChooser(intent,"Select Video"),PICK_VIDEO);
     }
 
     @Override
@@ -138,7 +163,51 @@ public class Solution2C2Activity extends AppCompatActivity {
 
         // TODO-C2 (6) Send Request to post a video with its cover image
         // if success, make a text Toast and show
+        if (ContextCompat.checkSelfPermission(this, READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{READ_EXTERNAL_STORAGE}, 1);
+        } else {
+            new UploadTask().execute("http://test.androidcamp.bytedance.com");
+        }
     }
+    private class UploadTask extends AsyncTask<String, Void, PostVideoResponse> {
+        /**
+         * The system calls this to perform work in a worker thread and
+         * delivers it the parameters given to AsyncTask.execute()
+         */
+        protected PostVideoResponse doInBackground(String... urls) {
+            MultipartBody.Part file1 = getMultipartFromUri("cover_image", mSelectedImage);
+            MultipartBody.Part file2 = getMultipartFromUri("video", mSelectedVideo);
+
+            Retrofit retrofit = new Retrofit.Builder()
+                    .baseUrl(urls[0])
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build();
+
+            Response<PostVideoResponse> response = null;
+            try {
+                response = retrofit.create(IMiniDouyinService.class).postvideo("16061184",
+                        "wdoudou", file1, file2).
+                        execute();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            Log.d(TAG, "doInBackground: upload status is successful? " + response.body().getSuccess());
+            return response.body();
+        }
+
+        /**
+         * The system calls this to perform work in the UI thread and delivers
+         * the result from doInBackground()
+         */
+        protected void onPostExecute(PostVideoResponse response) {
+            if (response.getSuccess()) {
+                Toast.makeText(Solution2C2Activity.this, "Upload suceesful", Toast.LENGTH_SHORT).show();
+                mBtn.setText(R.string.success_try_refresh);
+                mBtn.setEnabled(true);
+            }
+        }
+    }
+
 
     public void fetchFeed(View view) {
         mBtnRefresh.setText("requesting...");
@@ -147,6 +216,46 @@ public class Solution2C2Activity extends AppCompatActivity {
         // TODO-C2 (9) Send Request to fetch feed
         // if success, assign data to mFeeds and call mRv.getAdapter().notifyDataSetChanged()
         // don't forget to call resetRefreshBtn() after response received
+        new FetchTask().execute("http://test.androidcamp.bytedance.com");
+
+    }
+    private class FetchTask extends AsyncTask<String, Void, FeedResponse> {
+        /**
+         * The system calls this to perform work in a worker thread and
+         * delivers it the parameters given to AsyncTask.execute()
+         */
+        protected FeedResponse doInBackground(String... urls) {
+            Retrofit retrofit = new Retrofit.Builder()
+                    .baseUrl(urls[0])
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build();
+
+            Response<FeedResponse> response = null;
+            try {
+                response = retrofit.create(IMiniDouyinService.class).feedResponse().
+                        execute();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            Log.d(TAG, "doInBackground: fetch status is successful? " + response.body().getSuccess());
+            return response.body();
+        }
+
+        /**
+         * The system calls this to perform work in the UI thread and delivers
+         * the result from doInBackground()
+         */
+        protected void onPostExecute(FeedResponse response) {
+            if (response.getSuccess()) {
+                Toast.makeText(Solution2C2Activity.this, "Fetch suceesful", Toast.LENGTH_SHORT).show();
+                mFeeds = response.getFeeds();
+                mRv.getAdapter().notifyDataSetChanged();
+            }
+            else {
+                Toast.makeText(Solution2C2Activity.this, "Fetch fail", Toast.LENGTH_SHORT).show();
+            }
+            resetRefreshBtn();
+        }
     }
 
     private void resetRefreshBtn() {
